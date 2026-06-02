@@ -1,0 +1,268 @@
+Természetesen! Összegyűjtöttem és véglegesítettem az összes szükséges HTML és JSP fájlt mindkét alkalmazáshoz. Ezek a fájlok pontosan követik a feladatleírás (PDF) követelményeit , valamint tartalmazzák a JSTL (<c:forEach>, <c:choose>) logikát, az AJAX hívásokat és a JAAS authentikációhoz szükséges űrlapokat.  
+PDF
++ 3
+
+1. ALKALMAZÁS: potpotpotzh-admin-feladat (HTML és JSP fájlok)
+Ezeket a fájlokat a src/main/webapp/ mappába (illetve ahol külön jelezve van, a gyökérbe) kell tenned.
+
+src/main/webapp/login.html (A JAAS authentikáció belépési felülete)
+
+HTML
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Bejelentkezés</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .login-box { border: 1px solid #ccc; padding: 20px; width: 300px; }
+        input { margin-bottom: 10px; width: 90%; padding: 5px; }
+        button { padding: 5px 15px; }
+    </style>
+</head>
+<body>
+    <h2>Konferencia Rendszer - Adminisztráció</h2>
+    <div class="login-box">
+        <p>Kérjük, jelentkezzen be!</p>
+        <form method="POST" action="j_security_check">
+            <label>Felhasználónév:</label><br/>
+            <input type="text" name="j_username" required /><br/>
+            
+            <label>Jelszó:</label><br/>
+            <input type="password" name="j_password" required /><br/>
+            
+            <button type="submit">Belépés</button>
+        </form>
+    </div>
+</body>
+</html>
+src/main/webapp/login_failed.html (Sikertelen belépés esetén)
+
+HTML
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <title>Sikertelen Bejelentkezés</title>
+</head>
+<body>
+    <h2 style="color: red;">Hibás felhasználónév vagy jelszó!</h2>
+    <p>A megadott hitelesítési adatok érvénytelenek, vagy nincs megfelelő jogosultsága (role) az oldal megtekintéséhez.</p>
+    <a href="login.html">Vissza a bejelentkezéshez</a>
+</body>
+</html>
+src/main/webapp/index.jsp (Fő listázó felület - read, delete, log jogosultságokhoz)
+
+Java
+<%@ page contentType="text/html;charset=UTF-8" language="java" pageEncoding="UTF-8" %>
+<%@ taglib uri="jakarta.tags.core" prefix="c" %>
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <title>Konferencia Előadások - Admin</title>
+    <style>
+        table { border-collapse: collapse; width: 100%; max-width: 800px; }
+        th, td { border: 1px solid #aaa; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .error { color: red; font-weight: bold; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <h2>Rögzített Előadások Listája</h2>
+    
+    <%-- Hibaüzenet megjelenítése (pl. ha már érkezett szavazat és nem törölhető) --%>
+    <c:if test="${not empty errorMsg}">
+        <div class="error">${errorMsg}</div>
+    </c:if>
+
+    <table>
+        <tr>
+            <th>Cím</th>
+            <th>Előadó</th>
+            <th>Téma</th>
+            <th>Értékelés (Átlag)</th>
+            <th>Műveletek</th>
+        </tr>
+        <%-- A ListServlet adja át a 'presentations' attribútumot --%>
+        <c:forEach var="p" items="${presentations}">
+            <tr>
+                <td>${p.title}</td>
+                <td>${p.speakerName}</td>
+                <td>${p.topic}</td>
+                <td>
+                    <c:choose>
+                        <c:when test="${p.ratingCount > 0}">
+                            ${p.ratingSum / p.ratingCount} (${p.ratingCount} szavazat)
+                        </c:when>
+                        <c:otherwise>Még nincs értékelve</c:otherwise>
+                    </c:choose>
+                </td>
+                <td>
+                    <form action="${pageContext.request.contextPath}/delete" method="POST" style="display:inline;">
+                        <input type="hidden" name="id" value="${p.id}" />
+                        <button type="submit" onclick="return confirm('Biztosan törli ezt az előadást?');">Törlés</button>
+                    </form>
+
+                    <form action="${pageContext.request.contextPath}/log" method="POST" style="display:inline;">
+                        <input type="hidden" name="id" value="${p.id}" />
+                        <button type="submit">XML formátum</button>
+                    </form>
+                </td>
+            </tr>
+        </c:forEach>
+    </table>
+
+    <br/>
+    <a href="${pageContext.request.contextPath}/save.jsp">Új előadás rögzítése</a> 
+    &nbsp;|&nbsp; 
+    <a href="${pageContext.request.contextPath}/logout">Kijelentkezés</a>
+</body>
+</html>
+src/main/webapp/save.jsp (Új előadás rögzítése - create jogosultsághoz)
+
+Java
+<%@ page contentType="text/html;charset=UTF-8" language="java" pageEncoding="UTF-8" %>
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <title>Új előadás rögzítése</title>
+</head>
+<body>
+    <h2>Új előadás hozzáadása</h2>
+    
+    <%-- Figyelem: A Filter ellenőrzi, hogy a cím >= 5 karakter és az előadó nem üres --%>
+    <form action="${pageContext.request.contextPath}/save" method="POST">
+        <label>Előadás címe (min. 5 karakter):</label><br/>
+        <input type="text" name="title" required minlength="5" style="width: 300px;" /><br/><br/>
+        
+        <label>Előadó neve:</label><br/>
+        <input type="text" name="speaker_name" required style="width: 300px;" /><br/><br/>
+        
+        <label>Téma (Opcionális):</label><br/>
+        <input type="text" name="topic" style="width: 300px;" /><br/><br/>
+        
+        <button type="submit">Mentés az adatbázisba</button>
+    </form>
+    
+    <br/>
+    <a href="${pageContext.request.contextPath}/">Vissza a listához</a>
+</body>
+</html>
+2. ALKALMAZÁS: potpotpotzh-vote-feladat (Szavazó felület)
+Itt nincsenek biztonsági korlátozások (nincs login), a felület aszinkron AJAX hívásokkal (REST API) és egyedi tag library-vel működik.
+
+src/main/webapp/WEB-INF/tags/best.tag (A legjobb előadást kiíró egyedi Taglib)
+
+Java
+<%@ tag pageEncoding="UTF-8" %>
+<div style="margin: 20px 0; padding: 15px; background-color: #e8f5e9; border: 2px solid #4caf50; border-radius: 5px; max-width: 800px;">
+    <h3 style="margin-top: 0; color: #2e7d32;">A te legjobb előadásod:</h3>
+    <% 
+        String bestPresentation = "Még nem jelölt legjobb előadást.";
+        jakarta.servlet.http.Cookie[] cookies = request.getCookies();
+        if(cookies != null) {
+            for(jakarta.servlet.http.Cookie c : cookies) {
+                if("bestPresentation".equals(c.getName())) {
+                    // Dekódoljuk a JS encodeURIComponent által készített stringet
+                    bestPresentation = java.net.URLDecoder.decode(c.getValue(), java.nio.charset.StandardCharsets.UTF_8);
+                }
+            }
+        }
+    %>
+    <p style="font-size: 1.2em; font-weight: bold; margin-bottom: 0;">
+        <%= bestPresentation %>
+    </p>
+</div>
+src/main/webapp/index.jsp (Fő szavazó felület)
+
+Java
+<%@ page contentType="text/html;charset=UTF-8" language="java" pageEncoding="UTF-8" %>
+<%@ taglib uri="jakarta.tags.core" prefix="c" %>
+<%@ taglib prefix="mytags" tagdir="/WEB-INF/tags" %>
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <title>Konferencia Értékelő Rendszer</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 30px; }
+        table { border-collapse: collapse; width: 100%; max-width: 1000px; }
+        th, td { border: 1px solid #aaa; padding: 10px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .rating-btns button { margin-right: 5px; cursor: pointer; padding: 5px 10px; }
+        .best-btn { background-color: #ff9800; color: white; border: none; padding: 5px 10px; cursor: pointer; }
+    </style>
+    <script>
+        // 11. Feladat: AJAX hívás a REST endpoint felé (Jersey)
+        function vote(id, rating) {
+            fetch('${pageContext.request.contextPath}/api/presentations/' + id + '/vote', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: 'rating=' + rating
+            })
+            .then(response => {
+                if(response.ok) {
+                    location.reload(); // Frissítjük az oldalt az új átlagért
+                } else {
+                    alert('Hiba történt a szavazás során!');
+                }
+            });
+        }
+
+        // 12. Feladat: Süti (Cookie) beállítása a legjobb előadásra
+        function setBest(title, speaker) {
+            let encodedVal = encodeURIComponent(title + " - " + speaker);
+            // Süti beállítása 1 napos lejárattal
+            document.cookie = "bestPresentation=" + encodedVal + "; path=/; max-age=86400";
+            location.reload(); // Frissítünk, hogy a Taglib egyből kiírja az eredményt
+        }
+    </script>
+</head>
+<body>
+    <h2>Értékeld a Konferencia Előadásait!</h2>
+    
+    <mytags:best />
+
+    <table>
+        <tr>
+            <th>Cím</th>
+            <th>Előadó</th>
+            <th>Téma</th>
+            <th>Átlagértékelés</th>
+            <th>Szavazás (1-5)</th>
+            <th>Kiemelés</th>
+        </tr>
+        <%-- A VoteListServlet hívja be a webservice-t és adja át a 'list' attribútumot --%>
+        <c:forEach var="p" items="${list}">
+            <tr>
+                <td><strong>${p.title}</strong></td>
+                <td>${p.speakerName}</td>
+                <td>${p.topic}</td>
+                <td>
+                    <c:choose>
+                        <c:when test="${p.ratingCount > 0}">
+                            ${Math.round((p.ratingSum * 10.0) / p.ratingCount) / 10.0} 
+                            <span style="font-size: 0.8em; color: #666;">(${p.ratingCount} db)</span>
+                        </c:when>
+                        <c:otherwise>Nincs adat</c:otherwise>
+                    </c:choose>
+                </td>
+                <td class="rating-btns">
+                    <button onclick="vote(${p.id}, 1)">1</button>
+                    <button onclick="vote(${p.id}, 2)">2</button>
+                    <button onclick="vote(${p.id}, 3)">3</button>
+                    <button onclick="vote(${p.id}, 4)">4</button>
+                    <button onclick="vote(${p.id}, 5)">5</button>
+                </td>
+                <td>
+                    <button class="best-btn" onclick="setBest('${p.title}', '${p.speakerName}')">
+                        ★ Legjobb előadás
+                    </button>
+                </td>
+            </tr>
+        </c:forEach>
+    </table>
+</body>
+</html>
+Ezzel a frontend réteg is maradéktalanul illeszkedik a Java kódhoz. A JSTL konfigurációknak és a megfelelő form URL-eknek köszönhetően az oldalak zökkenőmentesen fognak kommunikálni a Servletekkel és az API-val.
