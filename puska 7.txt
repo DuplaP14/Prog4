@@ -1,0 +1,71 @@
+A feltöltött képen látható hibaüzenet alapján egy adatbázis hitelesítési hibába (authentication error) ütköztél.
+
+A pontos kivétel, ami elszállt:
+java.sql.SQLInvalidAuthorizationSpecException: Access denied for user 'zh2user'@'172.19.0.1' (using password: YES)
+
+Ez azt jelenti, hogy miközben a Tomcat szervered próbálja felépíteni a JNDI adatbázis-kapcsolatot (a jdbc/ZH2_2024_MariaDB nevű erőforráshoz), a MariaDB adatbázisszerver aktívan visszautasítja a csatlakozást.
+
+Íme a legvalószínűbb okok és a megoldásuk:
+
+1. Rossz felhasználónév vagy jelszó a konfigurációban
+Az alkalmazásod a zh2user felhasználónévvel és egy megadott jelszóval próbál belépni az adatbázisba.
+
+A hiba elhárítása: Nyisd meg a projektedben a META-INF/context.xml fájlt. Ellenőrizd le a <Resource> tagen belül, hogy a username és a password attribútumok pontosan megegyeznek-e az adatbázisban ténylegesen létező adatokkal! (Tipp: A korábban átküldött PDF feladatban a conference_admin_user volt a felhasználó, míg ez a hibaüzenet egy régebbi, zh2user nevű próbálkozásra utal. Lehet, hogy véletlenül egy másik projekt vagy egy régi context.xml fut?)
+
+2. Hiányzó hálózati (Host) jogosultságok
+A MariaDB-ben a felhasználói jogosultságok nemcsak a névhez, hanem ahhoz az IP-címhez is kötve vannak, ahonnan a kérés érkezik. A hibaüzenetből látszik, hogy a kérés a 172.19.0.1 IP-ről jön (ez tipikusan a Docker belső hálózati IP-címe).
+
+Ha az adatbázisban a felhasználót úgy hozták létre, hogy csak a saját gépről csatlakozhat (vagyis 'zh2user'@'localhost'), akkor a Docker hálózatából érkező kérést biztonsági okokból eldobja.
+
+A hiba elhárítása: Jogosultságot kell adni a felhasználónak, hogy bármilyen IP-ről (ezt jelöli a %) csatlakozhasson. Ha hozzáférsz az adatbázishoz (pl. DBeaverben vagy parancssorban), futtasd le ezt:
+
+SQL
+GRANT ALL PRIVILEGES ON *.* TO 'zh2user'@'%' IDENTIFIED BY 'a_pontos_jelszo';
+FLUSH PRIVILEGES;
+3. Nem futott le a Docker inicializáló szkriptje
+Ha Docker Compose-t használsz (az IP címből ítélve igen), megeshet, hogy maga a MariaDB szerver elindult ugyan, de az a kezdeti .sql szkript, aminek létre kellett volna hoznia a zh2user felhasználót és a táblákat, valamilyen hiba miatt nem futott le rendesen.
+
+A hiba elhárítása: Ellenőrizd a Docker logjait. Ha korábban már elindítottad a dockert hibás SQL-lel, a MariaDB megjegyezhette a rossz állapotot. Ilyenkor érdemes leállítani a konténert, letörölni a hozzá tartozó volume-ot (ahol az adatokat tárolja), és egy teljesen tiszta docker-compose up -d paranccsal újraindítani, hogy a szkriptek frissen lefutassanak.
+
+A hibaüzenetből (a zh2user és a ZH2_2024_MariaDB nevekből) egyértelműen látszik a probléma gyökere: benne maradt egy régebbi vizsga (2024-es 2. ZH) konfigurációja a projektedben. A mostani, konferenciás pótpótpótZH teljesen más adatbázis-nevet, felhasználót és jelszót vár el. Így tudod a leggyorsabban kijavítani:
+
+1. Lépés: Írd át a context.xml fájlt
+Nyisd meg a projektedben a src/main/webapp/META-INF/context.xml fájlt (vagy ha a Tomcat server.xml-jébe írtad, akkor azt). Töröld ki a benne lévő régi <Resource> taget, és cseréld le erre az újra, ami a mostani vizsgához tartozik:
+
+XML
+<?xml version="1.0" encoding="UTF-8"?>
+<Context>
+    <Resource name="jdbc/PotPotZH_conference_DB" 
+              auth="Container"
+              type="javax.sql.DataSource"
+              driverClassName="org.mariadb.jdbc.Driver"
+              factory="org.apache.tomcat.jdbc.pool.DataSourceFactory"
+              url="jdbc:mariadb://localhost:3306/potzh_conference_database" 
+              username="conference_admin_user"
+              password="PotZH2026Password111" 
+              maxActive="20" 
+              maxIdle="10" 
+              maxWait="-1" />
+
+    <Realm className="org.apache.catalina.realm.JAASRealm" 
+           appName="ConferenceJAAS" 
+           userClassNames="hu.pte.mik.prog4.potpotpotzh.jaas.UserPrincipal" 
+           roleClassNames="hu.pte.mik.prog4.potpotpotzh.jaas.RolePrincipal" />
+</Context>
+2. Lépés: Tisztítsd ki a Dockert (opcionális, de erősen ajánlott)
+Ha a Dockerben még a régi vizsga adatbázisa fut, akkor azt le kell állítani, hogy a mostani vizsga init.sql fájlja le tudjon futni. A projekt gyökerében (ahol a mostani docker-compose.yml van), nyiss egy terminált és futtasd ezeket:
+
+Állítsd le és töröld a régi konténereket:
+docker-compose down -v
+
+Indítsd el teljesen tisztán a mostanit:
+docker-compose up -d
+
+3. Lépés: Repository-k ellenőrzése
+Ha esetleg a Java kódban (BaseRepository.java vagy az entitásokhoz tartozó repository-k) is maradt utalás a régi JNDI névre, azt is írd át. Keresd meg a lookup metódust, és győződj meg róla, hogy ez szerepel benne:
+ctx.lookup("java:comp/env/jdbc/PotPotZH_conference_DB");
+
+4. Lépés: Tomcat újraindítása
+Ha ezeket átírtad, állítsd le a Tomcat szervert az IntelliJ-ben (piros négyzet), és indítsd el újra (zöld háromszög / Run).
+
+Így már a megfelelő conference_admin_user fiókkal fog csatlakozni a megfelelő adatbázishoz, és el fog tűnni a hitelesítési hiba!
